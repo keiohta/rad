@@ -2,22 +2,16 @@ import numpy as np
 import torch
 import argparse
 import os
-import math
-import gym
-import sys
-import random
 import time
 import json
 import dmc2gym
-import copy
 
 import utils
 from logger import Logger
 from video import VideoRecorder
 
 from curl_sac import RadSacAgent
-from torchvision import transforms
-import data_augs as rad
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -43,8 +37,9 @@ def parse_args():
     # critic
     parser.add_argument('--critic_lr', default=1e-3, type=float)
     parser.add_argument('--critic_beta', default=0.9, type=float)
-    parser.add_argument('--critic_tau', default=0.01, type=float) # try 0.05 or 0.1
-    parser.add_argument('--critic_target_update_freq', default=2, type=int) # try to change it to 1 and retain 0.01 above
+    parser.add_argument('--critic_tau', default=0.01, type=float)  # try 0.05 or 0.1
+    parser.add_argument('--critic_target_update_freq', default=2,
+                        type=int)  # try to change it to 1 and retain 0.01 above
     # actor
     parser.add_argument('--actor_lr', default=1e-3, type=float)
     parser.add_argument('--actor_beta', default=0.9, type=float)
@@ -75,7 +70,6 @@ def parse_args():
     # data augs
     parser.add_argument('--data_augs', default='crop', type=str)
 
-
     parser.add_argument('--log_interval', default=100, type=int)
     args = parser.parse_args()
     return args
@@ -95,7 +89,7 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
             while not done:
                 # center crop image
                 if args.encoder_type == 'pixel' and 'crop' in args.data_augs:
-                    obs = utils.center_crop_image(obs,args.image_size)
+                    obs = utils.center_crop_image(obs, args.image_size)
                 if args.encoder_type == 'pixel' and 'translate' in args.data_augs:
                     # first crop the center with pre_image_size
                     obs = utils.center_crop_image(obs, args.pre_transform_image_size)
@@ -113,33 +107,34 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
             video.save('%d.mp4' % step)
             L.log('eval/' + prefix + 'episode_reward', episode_reward, step)
             all_ep_rewards.append(episode_reward)
-        
-        L.log('eval/' + prefix + 'eval_time', time.time()-start_time , step)
+
+        L.log('eval/' + prefix + 'eval_time', time.time() - start_time, step)
         mean_ep_reward = np.mean(all_ep_rewards)
         best_ep_reward = np.max(all_ep_rewards)
         std_ep_reward = np.std(all_ep_rewards)
         L.log('eval/' + prefix + 'mean_episode_reward', mean_ep_reward, step)
         L.log('eval/' + prefix + 'best_episode_reward', best_ep_reward, step)
 
-        filename = args.work_dir + '/' + args.domain_name + '--'+args.task_name + '-' + args.data_augs + '--s' + str(args.seed) + '--eval_scores.npy'
+        filename = args.work_dir + '/' + args.domain_name + '--' + args.task_name + '-' + args.data_augs + '--s' + str(
+            args.seed) + '--eval_scores.npy'
         key = args.domain_name + '-' + args.task_name + '-' + args.data_augs
         try:
-            log_data = np.load(filename,allow_pickle=True)
+            log_data = np.load(filename, allow_pickle=True)
             log_data = log_data.item()
         except:
             log_data = {}
-            
+
         if key not in log_data:
             log_data[key] = {}
 
         log_data[key][step] = {}
-        log_data[key][step]['step'] = step 
-        log_data[key][step]['mean_ep_reward'] = mean_ep_reward 
-        log_data[key][step]['max_ep_reward'] = best_ep_reward 
-        log_data[key][step]['std_ep_reward'] = std_ep_reward 
+        log_data[key][step]['step'] = step
+        log_data[key][step]['mean_ep_reward'] = mean_ep_reward
+        log_data[key][step]['max_ep_reward'] = best_ep_reward
+        log_data[key][step]['std_ep_reward'] = std_ep_reward
         log_data[key][step]['env_step'] = step * args.action_repeat
 
-        np.save(filename,log_data)
+        np.save(filename, log_data)
 
     run_eval_loop(sample_stochastically=False)
     L.dump(step)
@@ -180,14 +175,15 @@ def make_agent(obs_shape, action_shape, args, device):
     else:
         assert 'agent is not supported: %s' % args.agent
 
+
 def main():
     args = parse_args()
-    if args.seed == -1: 
-        args.__dict__["seed"] = np.random.randint(1,1000000)
+    if args.seed == -1:
+        args.__dict__["seed"] = np.random.randint(1, 1000000)
     utils.set_seed_everywhere(args.seed)
 
     pre_transform_image_size = args.pre_transform_image_size if 'crop' in args.data_augs else args.image_size
-    pre_image_size = args.pre_transform_image_size # record the pre transform image size for translation
+    pre_image_size = args.pre_transform_image_size  # record the pre transform image size for translation
 
     env = dmc2gym.make(
         domain_name=args.domain_name,
@@ -199,20 +195,20 @@ def main():
         width=pre_transform_image_size,
         frame_skip=args.action_repeat
     )
- 
+
     env.seed(args.seed)
 
     # stack several consecutive frames together
     if args.encoder_type == 'pixel':
         env = utils.FrameStack(env, k=args.frame_stack)
-    
+
     # make directory
-    ts = time.gmtime() 
-    ts = time.strftime("%m-%d", ts)    
+    ts = time.gmtime()
+    ts = time.strftime("%m-%d", ts)
     env_name = args.domain_name + '-' + args.task_name
-    exp_name = env_name + '-' + ts + '-im' + str(args.image_size) +'-b'  \
-    + str(args.batch_size) + '-s' + str(args.seed)  + '-' + args.encoder_type
-    args.work_dir = args.work_dir + '/'  + exp_name
+    exp_name = env_name + '-' + ts + '-im' + str(args.image_size) + '-b' \
+               + str(args.batch_size) + '-s' + str(args.seed) + '-' + args.encoder_type
+    args.work_dir = args.work_dir + '/' + exp_name
 
     utils.make_dir(args.work_dir)
     video_dir = utils.make_dir(os.path.join(args.work_dir, 'video'))
@@ -229,8 +225,8 @@ def main():
     action_shape = env.action_space.shape
 
     if args.encoder_type == 'pixel':
-        obs_shape = (3*args.frame_stack, args.image_size, args.image_size)
-        pre_aug_obs_shape = (3*args.frame_stack,pre_transform_image_size,pre_transform_image_size)
+        obs_shape = (3 * args.frame_stack, args.image_size, args.image_size)
+        pre_aug_obs_shape = (3 * args.frame_stack, pre_transform_image_size, pre_transform_image_size)
     else:
         obs_shape = env.observation_space.shape
         pre_aug_obs_shape = obs_shape
@@ -252,7 +248,6 @@ def main():
         device=device
     )
 
-
     L = Logger(args.work_dir, use_tb=args.save_tb)
 
     episode, episode_reward, done = 0, 0, True
@@ -263,7 +258,7 @@ def main():
 
         if step % args.eval_freq == 0:
             L.log('eval/episode', episode, step)
-            evaluate(env, agent, video, args.num_eval_episodes, L, step,args)
+            evaluate(env, agent, video, args.num_eval_episodes, L, step, args)
             if args.save_model:
                 agent.save_curl(model_dir, step)
             if args.save_buffer:
@@ -295,7 +290,7 @@ def main():
 
         # run training update
         if step >= args.init_steps:
-            num_updates = 1 
+            num_updates = 1
             for _ in range(num_updates):
                 agent.update(replay_buffer, L, step)
 
